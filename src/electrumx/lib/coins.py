@@ -1563,7 +1563,7 @@ class Verus(KomodoMixin, EquihashMixin, Coin):
         '''Given a header return hash'''
         import verushash
         # if this may be the genesis block, use sha256, otherwise, VerusHash
-        if cls.header_prevhash(header) == bytes(32):
+        if cls.header_prevhash_rev(header) == bytes(32):
             return double_sha256(header)
         else:
             if header[0] == 4 and header[2] >= 1:
