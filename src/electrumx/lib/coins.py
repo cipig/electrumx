@@ -3825,7 +3825,7 @@ class Riecoin(Coin):
     REORG_LIMIT = 5000
 
     @classmethod
-    def header_hash(cls, header):
+    def header_hash_rev(cls, header):
         '''Given a header return the hash.'''
         import riecoin_module as riecoin
         return hex_str_to_hash(riecoin.riecoin_hash(hash_to_hex_str(header[::-1])))
