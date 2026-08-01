@@ -879,6 +879,35 @@ class BlockProcessor:
         # code already running in pool1 schedules work onto pool2.
         with ThreadPoolExecutor() as self.pool_executor1:
             with ThreadPoolExecutor() as self.pool_executor2:
+                # Initial bootstrap: if this is a fresh DB, do a conservative
+                # sequential bootstrap while thread pools exist. This avoids
+                # UTXO ordering races on brand-new DBs.
+                # Only do a conservative initial bootstrap for LBC (Lbry).
+                # Other coins keep the normal prefetch behavior.
+                if getattr(self.db, "first_sync", False) and (
+                    getattr(self.coin, "SHORTNAME", "").upper() == "LBC"
+                    or getattr(self.coin, "NAME", "").lower() == "lbry"
+                ):
+                    self.logger.info("initial bootstrap: doing conservative sequential sync for LBC")
+                    try:
+                        while True:
+                            daemon_height = await self.daemon.height()
+                            if self.height >= daemon_height:
+                                break
+                            # conservative small batch to avoid ordering/race issues
+                            batch_size = 10
+                            first = self.height + 1
+                            count = min(batch_size, daemon_height - self.height)
+                            if count <= 0:
+                                break
+                            hex_hashes = await self.daemon.block_hex_hashes(first, count)
+                            blocks = await self.daemon.raw_blocks(hex_hashes)
+                            # process and flush after each small batch so UTXOs are visible
+                            await self.check_and_advance_blocks(blocks)
+                            await self._maybe_flush()
+                        self.logger.info("initial bootstrap complete; switching to normal prefetcher")
+                    except Exception:
+                        self.logger.exception("initial bootstrap failed; will continue to normal prefetcher")
                 try:
                     async with OldTaskGroup() as group:
                         await group.spawn(self.prefetcher.main_loop(self.height))
