@@ -47,7 +47,6 @@ def _does_coin_require_testcase(coin: Coin) -> bool:
         coins.FairCoin,
         coins.Einsteinium,
         coins.Crown,
-        coins.Monaize,
         coins.Bitbay,
         coins.Fujicoin,
         coins.Neblio,
