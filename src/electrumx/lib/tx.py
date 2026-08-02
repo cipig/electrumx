@@ -586,10 +586,10 @@ class DeserializerZcash(DeserializerEquihash):
             self.cursor += 96 * nSpendsSapling    # vSpendsSapling
             nOutputsSapling = self._read_varint()
             self.cursor += 756 * nOutputsSapling  # vOutputsSapling
-            hasSapling = not(nSpendsSapling == 0 and nOutputsSapling == 0)
+            hasSapling = not (nSpendsSapling == 0 and nOutputsSapling == 0)
             if (hasSapling):
                 self.cursor += 8                  # valueBalanceSapling
-            if not(nSpendsSapling == 0):
+            if not (nSpendsSapling == 0):
                 self.cursor += 32                 # anchorSapling
             self.cursor += 192 * nSpendsSapling   # vSpendProofsSapling
             self.cursor += 64 * nSpendsSapling    # vSpendAuthSigsSapling
@@ -606,7 +606,7 @@ class DeserializerZcash(DeserializerEquihash):
                 self.cursor += 32                   # anchorOrchard
                 sizeProofsOrchard = self._read_varint()
                 self.cursor += sizeProofsOrchard    # proofsOrchard
-                self.cursor += 64 * nActionsOrchard # vSpendAuthSigsOrchard
+                self.cursor += 64 * nActionsOrchard  # vSpendAuthSigsOrchard
                 self.cursor += 64                   # bindingSigOrchard
             if is_zip229_v6:
                 nActionsIronwood = self._read_varint()
@@ -661,6 +661,7 @@ class DeserializerZcash(DeserializerEquihash):
                 f"failed canonical Zcash v{expected_version} txid calculation: {e}"
             ) from e
         return bytes(reversed(hex_str_to_bytes(tx.hash)))
+
 
 @dataclass(kw_only=True, slots=True)
 class TxPIVX(Tx):
