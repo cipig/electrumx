@@ -510,9 +510,11 @@ class DeserializerZcash(DeserializerEquihash):
     OVERWINTER_VERSION_GROUP_ID = 0x03C48270
     SAPLING_VERSION_GROUP_ID = 0x892F2085
     ZIP225_VERSION_GROUP_ID = 0x26A7270A
+    ZIP229_VERSION_GROUP_ID = 0xD884B698
     OVERWINTER_TX_VERSION = 3
     SAPLING_TX_VERSION = 4
     ZIP225_TX_VERSION = 5
+    ZIP229_TX_VERSION = 6
 
     ZFUTURE_VERSION_GROUP_ID = 0xFFFFFFFF
     ZFUTURE_TX_VERSION = 0x0000FFFF
@@ -531,8 +533,9 @@ class DeserializerZcash(DeserializerEquihash):
         is_overwinter_v3 = version == 3
         is_sapling_v4 = version == 4
         is_zip225_v5 = (overwintered and nVersionGroupId == self.ZIP225_VERSION_GROUP_ID and version == self.ZIP225_TX_VERSION)
+        is_zip229_v6 = (overwintered and nVersionGroupId == self.ZIP229_VERSION_GROUP_ID and version == self.ZIP229_TX_VERSION)
 
-        if not(is_zip225_v5):
+        if not (is_zip225_v5 or is_zip229_v6):
             base_tx = Tx(
                 version=version,
                 inputs=self._read_inputs(),       # inputs
@@ -605,15 +608,22 @@ class DeserializerZcash(DeserializerEquihash):
                 self.cursor += sizeProofsOrchard    # proofsOrchard
                 self.cursor += 64 * nActionsOrchard # vSpendAuthSigsOrchard
                 self.cursor += 64                   # bindingSigOrchard
+            if is_zip229_v6:
+                nActionsIronwood = self._read_varint()
+                self.cursor += 820 * nActionsIronwood
+                if nActionsIronwood > 0:
+                    self.cursor += 1
+                    self.cursor += 8
+                    self.cursor += 32
+                    sizeProofsIronwood = self._read_varint()
+                    self.cursor += sizeProofsIronwood
+                    self.cursor += 64 * nActionsIronwood
+                    self.cursor += 64
 
-        # TODO: read how we get read of read_tx_and_hash, changes in read_tx_block, etc.
-        # https://github.com/spesmilo/electrumx/commit/9c123a79962bdb3b95270fb44c7459ea9c4c985d
-        # base_tx.txid = base_tx.wtxid = self.TX_HASH_FN(self.binary[start:self.cursor])
-        # https://github.com/spesmilo/electrumx/commit/04357382f4eb2a8fc58eaf6fe64ead03888dedf1
-        # base_tx.txid_rev = base_tx.wtxid_rev = self.TX_HASH_FN(self.binary[orig_start:self.cursor])
-
-        if (version < 5):
+        if version < 5:
             txid_rev = double_sha256(self.binary[start:self.cursor])
+        elif is_zip229_v6:
+            txid_rev = self.zcash_txid_v6(self.binary[start:self.cursor])
         else:
             txid_rev = self.zcash_txid_v5(self.binary[start:self.cursor])
         base_tx.txid_rev = base_tx.wtxid_rev = txid_rev
@@ -621,14 +631,35 @@ class DeserializerZcash(DeserializerEquihash):
 
     @staticmethod
     def zcash_txid_v5(txin):
+        return DeserializerZcash._zcash_txid_canonical(txin, expected_version=5)
 
+    @staticmethod
+    def zcash_txid_v6(txin):
+        return DeserializerZcash._zcash_txid_canonical(txin, expected_version=6)
+
+    @staticmethod
+    def _zcash_txid_canonical(txin, *, expected_version):
         from electrumx.lib.zcash.mininode import CTransaction
         from io import BytesIO
         from electrumx.lib.zcash.util import hex_str_to_bytes
+        stream = BytesIO(txin)
         tx = CTransaction()
-        tx.deserialize(BytesIO(txin))
-        tx.rehash()
-        # print(repr(tx))
+        try:
+            tx.deserialize(stream)
+            consumed = stream.tell()
+            if consumed != len(txin):
+                raise ValueError(
+                    f"canonical parser consumed {consumed} of {len(txin)} bytes"
+                )
+            if tx.nVersion != expected_version:
+                raise ValueError(
+                    f"canonical parser produced version {tx.nVersion}, expected {expected_version}"
+                )
+            tx.rehash()
+        except Exception as e:
+            raise ValueError(
+                f"failed canonical Zcash v{expected_version} txid calculation: {e}"
+            ) from e
         return bytes(reversed(hex_str_to_bytes(tx.hash)))
 
 @dataclass(kw_only=True, slots=True)

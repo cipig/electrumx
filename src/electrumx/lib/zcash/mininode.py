@@ -61,6 +61,7 @@ SPROUT_VERSION_GROUP_ID = 0x00000000
 OVERWINTER_VERSION_GROUP_ID = 0x03C48270
 SAPLING_VERSION_GROUP_ID = 0x892F2085
 ZIP225_VERSION_GROUP_ID = 0x26A7270A
+ZIP229_VERSION_GROUP_ID = 0xD884B698
 # No transaction format change in Blossom.
 
 MAX_INV_SZ = 50000
@@ -463,12 +464,14 @@ class OrchardAction(object):
 
 ORCHARD_FLAGS_ENABLE_SPENDS = 0b00000001
 ORCHARD_FLAGS_ENABLE_OUTPUTS = 0b00000010
+ORCHARD_FLAGS_ENABLE_CROSS_ADDRESS = 0b00000100
 
 class OrchardBundle(object):
     def __init__(self):
         self.actions = []
         self.enableSpends = False
         self.enableOutputs = False
+        self.enableCrossAddress = False
         self.valueBalance = 0
         self.anchor = None
         self.proofs = []
@@ -481,6 +484,7 @@ class OrchardBundle(object):
             flags = struct.unpack("B", f.read(1))[0]
             self.enableSpends = (flags & ORCHARD_FLAGS_ENABLE_SPENDS) != 0
             self.enableOutputs = (flags & ORCHARD_FLAGS_ENABLE_OUTPUTS) != 0
+            self.enableCrossAddress = (flags & ORCHARD_FLAGS_ENABLE_CROSS_ADDRESS) != 0
             self.valueBalance = struct.unpack("<q", f.read(8))[0]
             self.anchor = deser_uint256(f)
             self.proofs = deser_char_vector(f)
@@ -509,14 +513,32 @@ class OrchardBundle(object):
             ORCHARD_FLAGS_ENABLE_SPENDS if self.enableSpends else 0
         ) ^ (
             ORCHARD_FLAGS_ENABLE_OUTPUTS if self.enableOutputs else 0
+        ) ^ (
+            ORCHARD_FLAGS_ENABLE_CROSS_ADDRESS if self.enableCrossAddress else 0
         )
 
     def __repr__(self):
-        return "OrchardBundle(actions=%r, enableSpends=%s, enableOutputs=%s, valueBalance=%i, proofs=%r, spendAuthSigs=%r, bindingSig=%r)" \
+        return "OrchardBundle(actions=%r, enableSpends=%s, enableOutputs=%s, enableCrossAddress=%s, valueBalance=%i, proofs=%r, spendAuthSigs=%r, bindingSig=%r)" \
             % (
                 self.actions,
                 self.enableSpends,
                 self.enableOutputs,
+                self.enableCrossAddress,
+                self.valueBalance,
+                self.proofs,
+                self.spendAuthSigs,
+                self.bindingSig,
+            )
+
+
+class IronwoodBundle(OrchardBundle):
+    def __repr__(self):
+        return "IronwoodBundle(actions=%r, enableSpends=%s, enableOutputs=%s, enableCrossAddress=%s, valueBalance=%i, proofs=%r, spendAuthSigs=%r, bindingSig=%r)" \
+            % (
+                self.actions,
+                self.enableSpends,
+                self.enableOutputs,
+                self.enableCrossAddress,
                 self.valueBalance,
                 self.proofs,
                 self.spendAuthSigs,
@@ -974,6 +996,7 @@ class CTransaction(object):
             self.fOverwintered = True
             self.nVersion = 4
             self.nVersionGroupId = SAPLING_VERSION_GROUP_ID
+            self.nConsensusBranchId = 0
             self.vin = []
             self.vout = []
             self.nLockTime = 0
@@ -981,6 +1004,7 @@ class CTransaction(object):
             self.valueBalance = 0
             self.saplingBundle = SaplingBundle()
             self.orchardBundle = OrchardBundle()
+            self.ironwoodBundle = IronwoodBundle()
             self.shieldedSpends = []
             self.shieldedOutputs = []
             self.vJoinSplit = []
@@ -993,6 +1017,7 @@ class CTransaction(object):
             self.fOverwintered = tx.fOverwintered
             self.nVersion = tx.nVersion
             self.nVersionGroupId = tx.nVersionGroupId
+            self.nConsensusBranchId = tx.nConsensusBranchId
             self.vin = copy.deepcopy(tx.vin)
             self.vout = copy.deepcopy(tx.vout)
             self.nLockTime = tx.nLockTime
@@ -1000,6 +1025,7 @@ class CTransaction(object):
             self.valueBalance = tx.valueBalance
             self.saplingBundle = copy.deepcopy(tx.saplingBundle)
             self.orchardBundle = copy.deepcopy(tx.orchardBundle)
+            self.ironwoodBundle = copy.deepcopy(tx.ironwoodBundle)
             self.shieldedSpends = copy.deepcopy(tx.shieldedSpends)
             self.shieldedOutputs = copy.deepcopy(tx.shieldedOutputs)
             self.vJoinSplit = copy.deepcopy(tx.vJoinSplit)
@@ -1023,10 +1049,13 @@ class CTransaction(object):
                        self.nVersionGroupId == SAPLING_VERSION_GROUP_ID and
                        self.nVersion == 4)
         isNu5V5 = (self.fOverwintered and
-                       self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
-                       self.nVersion == 5)
+                   self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
+                   self.nVersion == 5)
+        isNu63V6 = (self.fOverwintered and
+                    self.nVersionGroupId == ZIP229_VERSION_GROUP_ID and
+                    self.nVersion == 6)
 
-        if isNu5V5:
+        if isNu5V5 or isNu63V6:
             # Common transaction fields
             self.nConsensusBranchId = struct.unpack("<I", f.read(4))[0]
             self.nLockTime = struct.unpack("<I", f.read(4))[0]
@@ -1044,6 +1073,15 @@ class CTransaction(object):
             self.orchardBundle = OrchardBundle()
             self.orchardBundle.deserialize(f)
 
+            # Ironwood transaction fields
+            if isNu63V6:
+                self.ironwoodBundle = IronwoodBundle()
+                self.ironwoodBundle.deserialize(f)
+            else:
+                self.ironwoodBundle = IronwoodBundle()
+
+            self.sha256 = None
+            self.hash = None
             return
 
         self.vin = deser_vector(f, CTxIn)
@@ -1079,10 +1117,13 @@ class CTransaction(object):
                        self.nVersionGroupId == SAPLING_VERSION_GROUP_ID and
                        self.nVersion == 4)
         isNu5V5 = (self.fOverwintered and
-                       self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
-                       self.nVersion == 5)
+                   self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
+                   self.nVersion == 5)
+        isNu63V6 = (self.fOverwintered and
+                    self.nVersionGroupId == ZIP229_VERSION_GROUP_ID and
+                    self.nVersion == 6)
 
-        if isNu5V5:
+        if isNu5V5 or isNu63V6:
             r = b""
 
             # Common transaction fields
@@ -1101,6 +1142,10 @@ class CTransaction(object):
 
             # Orchard transaction fields
             r += self.orchardBundle.serialize()
+
+            # Ironwood transaction fields
+            if isNu63V6:
+                r += self.ironwoodBundle.serialize()
 
             return r
 
