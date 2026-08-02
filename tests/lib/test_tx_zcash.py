@@ -18,13 +18,8 @@ def test_tx_txids():
         txid = test[0]
         test = bytes.fromhex(test[1])
         deser = tx_lib.DeserializerZcash(test)
-        # _tx = deser.read_tx()
-        _tx, _tx_hash = deser.read_tx_and_hash()
-        # print(type(_tx), hash_to_hex_str(_tx_hash))
-        # if len(_tx.outputs) > 0:
-        #     for output in _tx.outputs:
-        #         print(hash_to_hex_str(_tx_hash) + ": " + output.pk_script.hex() + " - " + str(output.value))
-        assert hash_to_hex_str(_tx_hash) == txid
+        tx = deser.read_tx()
+        assert hash_to_hex_str(tx.txid_rev) == txid
 
 # def main():
 #     test_tx_txids();

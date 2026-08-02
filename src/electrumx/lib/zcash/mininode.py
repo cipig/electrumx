@@ -25,7 +25,6 @@
 
 import struct
 import socket
-import asyncore
 import time
 import sys
 import random
@@ -38,6 +37,20 @@ from threading import Thread
 import logging
 import copy
 from hashlib import blake2b
+
+try:
+    import asyncore
+except ModuleNotFoundError:
+    class _AsyncoreCompat:
+        class dispatcher:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        @staticmethod
+        def loop(*args, **kwargs):
+            raise RuntimeError("asyncore is unavailable on this Python runtime")
+
+    asyncore = _AsyncoreCompat()
 
 from .equihash import (
     gbp_basic,
