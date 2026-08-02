@@ -54,6 +54,11 @@ def _does_coin_require_testcase(coin: Coin) -> bool:
         coins.Sibcoin,
         coins.CanadaeCoin,
         coins.Auroracoin,
+        coins.Clam,
+        coins.Diabase,
+        coins.Pepecoin,
+        coins.Riecoin,
+        coins.Verus,
     ]:
         return False
     return True

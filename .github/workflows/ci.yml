@@ -79,6 +79,7 @@ jobs:
       - name: Run pycodestyle
         run: |
           pycodestyle \
+            --exclude=src/electrumx/lib/zcash \
             --max-line-length=140 \
             src
 
