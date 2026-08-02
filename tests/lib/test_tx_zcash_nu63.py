@@ -23,6 +23,12 @@ from electrumx.lib.zcash.mininode import (
 NU63_BRANCH_ID = 0x37A5165B
 ZIP229_VERSION_GROUP_ID = 0xD884B698
 ZIP225_VERSION_GROUP_ID = 0x26A7270A
+REAL_MAINNET_V6_TX_HEX = (
+    "0600008098b684d85b16a5370000000099503400010000000000000000000000000000000000"
+    "000000000000000000000000000000ffffffff090399503404f09fa693ffffffff0240597307"
+    "000000001976a91425db9091e9786867e536f70089a5102523ab1d6a88ac20bcbe0000000000"
+    "17a914c20cd5bdf7964ca61764db66bc2531b1792a084d8700000000"
+)
 
 
 def _u256(byte):
@@ -222,3 +228,20 @@ def test_v6_roundtrip_deserialize_serialize_and_txid_with_ironwood():
     deser_tx = DeserializerZcash(raw_tx).read_tx()
     assert deser_tx.version == 6
     assert hash_to_hex_str(deser_tx.txid_rev) == hash_to_hex_str(zip244.txid_digest(parsed))
+
+
+def test_real_mainnet_v6_coinbase_parses_and_hashes():
+    raw_tx = bytes.fromhex(REAL_MAINNET_V6_TX_HEX)
+
+    tx = CTransaction()
+    tx.deserialize(BytesIO(raw_tx))
+    assert tx.nVersion == 6
+    assert tx.nVersionGroupId == ZIP229_VERSION_GROUP_ID
+    assert tx.nConsensusBranchId == NU63_BRANCH_ID
+    assert tx.serialize() == raw_tx
+
+    deser_tx = DeserializerZcash(raw_tx).read_tx()
+    assert deser_tx.version == 6
+    assert deser_tx.inputs[0].is_generation()
+    assert len(deser_tx.outputs) == 2
+    assert deser_tx.txid_rev == zip244.txid_digest(tx)
