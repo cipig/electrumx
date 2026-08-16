@@ -3779,11 +3779,8 @@ class Clam(ScryptMixin, Coin):
     NAME = "Clam"
     SHORTNAME = "CLAM"
     NET = "mainnet"
-    XPUB_VERBYTES = bytes.fromhex("0488b21e")
-    XPRV_VERBYTES = bytes.fromhex("0488ade4")
     P2PKH_VERBYTE = bytes.fromhex("89")
     P2SH_VERBYTES = (bytes.fromhex("0d"),)
-    WIF_BYTE = bytes.fromhex("85")
     GENESIS_HASH = ('00000c3ce6b3d823a35224a39798eca9'
                     'ad889966aeb5a9da7b960ffb9869db35')
     DESERIALIZER = lib_tx.DeserializerTrezarcoin
@@ -3813,7 +3810,6 @@ class Riecoin(Coin):
     NET = "mainnet"
     P2PKH_VERBYTE = bytes.fromhex("3c")
     P2SH_VERBYTES = (bytes.fromhex("41"),)
-    WIF_BYTE = bytes.fromhex("bc")
     GENESIS_HASH = ('e1ea18d0676ef9899fbc78ef428d1d26'
                     'a2416d0f0441d46668d33bcb41275740')
     DESERIALIZER = lib_tx.DeserializerSegWit
@@ -3835,11 +3831,8 @@ class Pepecoin(AuxPowMixin, Coin):
     NAME = "Pepecoin"
     SHORTNAME = "PEP"
     NET = "mainnet"
-    XPUB_VERBYTES = bytes.fromhex("02facafd")
-    XPRV_VERBYTES = bytes.fromhex("02fac398")
     P2PKH_VERBYTE = bytes.fromhex("38")
     P2SH_VERBYTES = (bytes.fromhex("16"),)
-    WIF_BYTE = bytes.fromhex("9e")
     GENESIS_HASH = ('37981c0c48b8d48965376c8a42ece9a0'
                     '838daadb93ff975cb091f57f8c2a5faa')
     PEERS = [
