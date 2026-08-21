@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from electrumx.lib.coins import Bitcoin, CoinError, Ravencoin, RavencoinTestnet
@@ -5,9 +7,11 @@ from electrumx.server.ravencoin_backend import (
     BackendIdentity,
     INCIDENT_CHECKPOINT_HASH,
     KAWPOW_HEIGHT_ENFORCEMENT_HEIGHT,
+    OFFICIAL_RAVEND_BUILDS,
     RavencoinDaemon,
     RavencoinElectrumX,
     configure_ravencoin_coin,
+    detect_unique_official_ravend,
     evaluate_backend,
     parse_core_version,
 )
@@ -53,10 +57,10 @@ def test_backend_payload_matches_electrum_ravencoin_contract():
         checkpoint_hash=INCIDENT_CHECKPOINT_HASH,
         observed_at=1_777_000_000,
     )
-    identity = BackendIdentity.from_config(
-        repository='2miners/Ravencoin',
+    identity = BackendIdentity(
+        repository='RavenProject/Ravencoin',
         tag='v4.8.0',
-        commit='b60f50e04f1fba425b28804e61be2694faaf3469',
+        commit='22549129888d02e0e08fcdb9f96f3c699167e774',
         artifact_sha256=(
             '966cf8978af1f2e3f36e9733d011eb92'
             'f4116750af6f8e77c5a5ced525577c4c'
@@ -74,7 +78,7 @@ def test_backend_payload_matches_electrum_ravencoin_contract():
     assert payload['backend']['versionNumber'] == 4_080_000
     assert payload['backend']['subversion'] == '/Ravencoin:4.8.0/'
     assert payload['backend']['network'] == 'main'
-    assert payload['backend']['identity']['sourceRepository'] == '2miners/Ravencoin'
+    assert payload['backend']['identity']['sourceRepository'] == 'RavenProject/Ravencoin'
     assert payload['compatibility']['minimumSafeCore'] == '4.8.0'
     assert payload['compatibility']['coreSafe'] is True
     assert payload['compatibility']['networkMatches'] is True
@@ -112,13 +116,75 @@ def test_wrong_checkpoint_is_reported_unsafe():
     assert status.core_safe is False
 
 
-def test_verified_identity_requires_artifact_digest():
-    with pytest.raises(ValueError, match='ARTIFACT_SHA256'):
+def test_manual_configuration_cannot_claim_verified_identity():
+    with pytest.raises(ValueError, match='reserved for automatic'):
         BackendIdentity.from_config(
-            repository='2miners/Ravencoin',
-            commit='b60f50e04f1fba425b28804e61be2694faaf3469',
+            repository='RavenProject/Ravencoin',
+            commit='22549129888d02e0e08fcdb9f96f3c699167e774',
+            artifact_sha256='a' * 64,
             evidence='BUILD_IDENTITY_VERIFIED',
         )
+
+
+def test_official_binary_is_identified_from_its_bytes(tmp_path, monkeypatch):
+    executable = tmp_path / 'ravend'
+    executable.write_bytes(b'exact official test executable')
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    release = next(iter(OFFICIAL_RAVEND_BUILDS.values()))
+    monkeypatch.setitem(OFFICIAL_RAVEND_BUILDS, digest, release)
+
+    identity = BackendIdentity.from_official_binary(executable)
+
+    assert identity.evidence == 'BUILD_IDENTITY_VERIFIED'
+    assert identity.repository == 'RavenProject/Ravencoin'
+    assert identity.commit == '22549129888d02e0e08fcdb9f96f3c699167e774'
+    assert identity.binary_sha256 == digest
+    assert identity.public_dict()['architecture'] == 'x86_64-linux-gnu'
+
+
+def test_unknown_binary_fails_closed(tmp_path):
+    executable = tmp_path / 'ravend'
+    executable.write_bytes(b'unknown build')
+    with pytest.raises(ValueError, match='unrecognized SHA-256'):
+        BackendIdentity.from_official_binary(executable)
+
+
+def test_pidfile_hashes_the_live_process_executable(tmp_path, monkeypatch):
+    pid_file = tmp_path / 'ravend.pid'
+    pid_file.write_text('1234\n', encoding='ascii')
+    process = tmp_path / 'proc' / '1234'
+    process.mkdir(parents=True)
+    executable = process / 'exe'
+    executable.write_bytes(b'official process')
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    monkeypatch.setitem(
+        OFFICIAL_RAVEND_BUILDS, digest, next(iter(OFFICIAL_RAVEND_BUILDS.values()))
+    )
+
+    identity = BackendIdentity.from_pid_file(pid_file, proc_root=tmp_path / 'proc')
+
+    assert identity.binary_sha256 == digest
+
+
+def test_auto_detection_requires_exactly_one_official_process(tmp_path, monkeypatch):
+    proc_root = tmp_path / 'proc'
+    process = proc_root / '1234'
+    process.mkdir(parents=True)
+    (process / 'comm').write_text('ravend\n', encoding='ascii')
+    (process / 'exe').write_bytes(b'official process')
+    digest = hashlib.sha256((process / 'exe').read_bytes()).hexdigest()
+    monkeypatch.setitem(
+        OFFICIAL_RAVEND_BUILDS, digest, next(iter(OFFICIAL_RAVEND_BUILDS.values()))
+    )
+
+    identity = detect_unique_official_ravend(proc_root)
+    assert identity.evidence == 'BUILD_IDENTITY_VERIFIED'
+
+    second = proc_root / '5678'
+    second.mkdir()
+    (second / 'comm').write_text('ravend\n', encoding='ascii')
+    (second / 'exe').write_bytes(b'official process')
+    assert detect_unique_official_ravend(proc_root).evidence == 'VERSION_ONLY'
 
 
 def test_ravencoin_configuration_is_coin_local():

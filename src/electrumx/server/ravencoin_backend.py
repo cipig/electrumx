@@ -12,6 +12,8 @@ existing generic Daemon and ElectrumX classes unchanged.
 
 import asyncio
 from dataclasses import dataclass
+import hashlib
+from pathlib import Path
 import re
 import time
 
@@ -32,6 +34,22 @@ INCIDENT_CHECKPOINT_HASH = (
 KAWPOW_HEIGHT_ENFORCEMENT_HEIGHT = 4_487_776
 SAFETY_PROFILE = 'rvn-consensus-2026-08-v1'
 
+# Exact official RavenProject release artifacts.  A version string is never
+# enough to select one of these entries: automatic identity is enabled only
+# after hashing the executable itself.
+OFFICIAL_RAVEND_BUILDS = {
+    '885f6670c819e3a48339bbc596f1a224fe41af21ae7a0db57b2ebca700d050ea': {
+        'repository': 'RavenProject/Ravencoin',
+        'tag': 'v4.8.0',
+        'commit': '22549129888d02e0e08fcdb9f96f3c699167e774',
+        'artifact_sha256': (
+            'cb359b6a5b42e47068cd655231484fcc'
+            '763d2f79eae5ea318b029c704a4dc020'
+        ),
+        'architecture': 'x86_64-linux-gnu',
+    },
+}
+
 
 class IdentityEvidence:
     '''How strongly the operator can identify the running Ravencoin Core build.'''
@@ -51,6 +69,8 @@ class BackendIdentity:
     tag: str | None = None
     commit: str | None = None
     artifact_sha256: str | None = None
+    binary_sha256: str | None = None
+    architecture: str | None = None
     evidence: str = IdentityEvidence.VERSION_ONLY
 
     @classmethod
@@ -79,9 +99,10 @@ class BackendIdentity:
         if repository is None or commit is None:
             return cls(evidence=IdentityEvidence.VERSION_ONLY)
 
-        if declared == IdentityEvidence.BUILD_VERIFIED and artifact_sha256 is None:
+        if declared == IdentityEvidence.BUILD_VERIFIED:
             raise ValueError(
-                'BUILD_IDENTITY_VERIFIED requires RAVENCOIN_ARTIFACT_SHA256'
+                'BUILD_IDENTITY_VERIFIED is reserved for automatic executable '
+                'hash verification'
             )
 
         return cls(
@@ -92,6 +113,42 @@ class BackendIdentity:
             evidence=declared or IdentityEvidence.ATTESTED,
         )
 
+    @classmethod
+    def from_official_binary(cls, path):
+        '''Identify one exact official build by hashing the executable bytes.'''
+        path = Path(path)
+        try:
+            digest = _sha256_file(path)
+        except OSError as exc:
+            raise ValueError(f'cannot read running Ravencoin Core binary {path}: {exc}') from exc
+
+        release = OFFICIAL_RAVEND_BUILDS.get(digest)
+        if release is None:
+            raise ValueError(
+                f'Ravencoin Core binary {path} has unrecognized SHA-256 {digest}'
+            )
+        return cls(
+            repository=release['repository'],
+            tag=release['tag'],
+            commit=release['commit'],
+            artifact_sha256=release['artifact_sha256'],
+            binary_sha256=digest,
+            architecture=release['architecture'],
+            evidence=IdentityEvidence.BUILD_VERIFIED,
+        )
+
+    @classmethod
+    def from_pid_file(cls, pid_file, proc_root='/proc'):
+        '''Hash the executable of the live process named by a ravend pidfile.'''
+        pid_file = Path(pid_file)
+        try:
+            literal = pid_file.read_text(encoding='ascii').strip()
+        except OSError as exc:
+            raise ValueError(f'cannot read Ravencoin Core pidfile {pid_file}: {exc}') from exc
+        if not re.fullmatch(r'[1-9][0-9]*', literal):
+            raise ValueError(f'Ravencoin Core pidfile {pid_file} is malformed')
+        return cls.from_official_binary(Path(proc_root) / literal / 'exe')
+
     def public_dict(self):
         result = {'evidence': self.evidence}
         if self.repository is not None and self.commit is not None:
@@ -101,7 +158,52 @@ class BackendIdentity:
                 result['sourceTag'] = self.tag
             if self.artifact_sha256 is not None:
                 result['artifactSha256'] = self.artifact_sha256
+            if self.binary_sha256 is not None:
+                result['binarySha256'] = self.binary_sha256
+            if self.architecture is not None:
+                result['architecture'] = self.architecture
         return result
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def detect_unique_official_ravend(proc_root='/proc'):
+    '''Return verified identity for one visible live ravend, else VERSION_ONLY.
+
+    Discovery is deliberately fail-closed.  No identity is selected if zero or
+    multiple accessible ``ravend`` processes exist, or if the sole executable
+    is not an exact known official build.
+    '''
+    proc_root = Path(proc_root)
+    candidates = []
+    ravend_processes = 0
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError:
+        return BackendIdentity()
+
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            if (process / 'comm').read_text(encoding='ascii').strip() != 'ravend':
+                continue
+            ravend_processes += 1
+            candidates.append(BackendIdentity.from_official_binary(process / 'exe'))
+        except (OSError, UnicodeError, ValueError):
+            # An inaccessible or unknown process cannot contribute identity.
+            continue
+    return (
+        candidates[0]
+        if ravend_processes == 1 and len(candidates) == 1
+        else BackendIdentity()
+    )
 
 
 def parse_core_version(version):

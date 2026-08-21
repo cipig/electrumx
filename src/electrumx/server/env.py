@@ -66,6 +66,7 @@ class Env(EnvBase):
             from electrumx.server.ravencoin_backend import (
                 BackendIdentity,
                 configure_ravencoin_coin,
+                detect_unique_official_ravend,
             )
 
             configure_ravencoin_coin(self.coin)
@@ -77,13 +78,32 @@ class Env(EnvBase):
                     'RAVENCOIN_BACKEND_INFO_MAX_AGE must be between 0 and 60 seconds'
                 )
             try:
-                self.ravencoin_backend_identity = BackendIdentity.from_config(
-                    repository=self.default('RAVENCOIN_SOURCE_REPOSITORY', ''),
-                    tag=self.default('RAVENCOIN_SOURCE_TAG', ''),
-                    commit=self.default('RAVENCOIN_SOURCE_COMMIT', ''),
-                    artifact_sha256=self.default('RAVENCOIN_ARTIFACT_SHA256', ''),
-                    evidence=self.default('RAVENCOIN_IDENTITY_EVIDENCE', ''),
-                )
+                configured = {
+                    'repository': self.default('RAVENCOIN_SOURCE_REPOSITORY', ''),
+                    'tag': self.default('RAVENCOIN_SOURCE_TAG', ''),
+                    'commit': self.default('RAVENCOIN_SOURCE_COMMIT', ''),
+                    'artifact_sha256': self.default('RAVENCOIN_ARTIFACT_SHA256', ''),
+                    'evidence': self.default('RAVENCOIN_IDENTITY_EVIDENCE', ''),
+                }
+                pid_file = self.default('RAVENCOIN_CORE_PID_FILE', '').strip()
+                binary = self.default('RAVENCOIN_CORE_BINARY', '').strip()
+                automatic = self.boolean('RAVENCOIN_AUTO_VERIFY_CORE', True)
+                methods = sum((bool(any(configured.values())), bool(pid_file), bool(binary)))
+                if methods > 1:
+                    raise ValueError(
+                        'manual identity, RAVENCOIN_CORE_PID_FILE and '
+                        'RAVENCOIN_CORE_BINARY are mutually exclusive'
+                    )
+                if any(configured.values()):
+                    self.ravencoin_backend_identity = BackendIdentity.from_config(**configured)
+                elif pid_file:
+                    self.ravencoin_backend_identity = BackendIdentity.from_pid_file(pid_file)
+                elif binary:
+                    self.ravencoin_backend_identity = BackendIdentity.from_official_binary(binary)
+                elif automatic:
+                    self.ravencoin_backend_identity = detect_unique_official_ravend()
+                else:
+                    self.ravencoin_backend_identity = BackendIdentity()
             except ValueError as exc:
                 raise self.Error(
                     f'invalid Ravencoin backend identity configuration: {exc}'
